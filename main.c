@@ -2,7 +2,6 @@
 #include "string.h"
 #include "X11/Xlib.h"
 #include "X11/keysym.h"
-#include "X11/Xatom.h"
 #include "stdlib.h"
 #include "unistd.h"
 #include "signal.h"
@@ -21,6 +20,44 @@ typedef enum {
     LAYOUT_FIBONACCI,
     LAYOUT_SCROLL,
 } Layout;
+
+typedef enum {
+     ACTION_KEY_SPAWN_TERMINAL,
+     ACTION_KEY_KILL_WINDOW,
+     ACTION_KEY_PREVIOUS_WINDOW,
+     ACTION_KEY_NEXT_WINDOW,
+     ACTION_KEY_SET_WORKSPACE_1,
+     ACTION_KEY_SET_WORKSPACE_2,
+     ACTION_KEY_SET_WORKSPACE_3,
+     ACTION_KEY_SET_WORKSPACE_4,
+     ACTION_KEY_SET_WORKSPACE_5,
+     ACTION_KEY_SET_WORKSPACE_6,
+     ACTION_KEY_SET_WORKSPACE_7,
+     ACTION_KEY_SET_WORKSPACE_9,
+     ACTION_KEY_SET_WORKSPACE_8,
+     ACTION_KEY_SET_WORKSPACE_0,
+     ACTION_KEY_SET_MASTER_LAYOUT,
+     ACTION_KEY_SET_SUPERIOR_MASTER_LAYOUT,
+     ACTION_KEY_SET_DWINDLE_LAYOUT,
+     ACTION_KEY_SET_FIBONACCI_LAYOUT,
+     ACTiON_KEY_SET_SCROLL_LAYOUT,
+     ACTION_KEY_RELOAD_CONFIGURATION,
+     ACTION_KEY_SPAWN_LAUNCHER,
+     ACTION_KEY_EXIT,
+     ACTION_KEY_TOGGLE_FULLSCREEN,
+     ACTION_KEY_SIZE
+} ActionKey;
+
+typedef enum {
+     MOD_SUPER = Mod4Mask,
+     MOD_ALT = Mod1Mask
+} Mod;
+
+typedef struct {
+     KeySym sym;
+     void (*action)(void);
+     Mod mod;
+} Key;
 
 typedef struct {
     Window windows[36];
@@ -56,9 +93,279 @@ typedef struct {
     int screenHeight;
     int borderWidth;
     bool running;
+    bool isFullscren;
 } Globals;
 
 static Globals globals;
+
+void spawnTerminal();
+void killClient();
+void switchWorkspace(int workspace);
+void switchLayout(Layout layout);
+void readConfiguration();
+void spawnLauncher();
+void toggleFullscreen();
+void tile();
+void focusWindow(int index);
+
+void actionSpawnTerminal() {
+     spawnTerminal();
+}
+
+void actionKillWindow() {
+     killClient();
+}
+
+void actionPreviousWindow() {
+     int* focusedWindowIndex = &globals.workspaces[globals.currentWorkspace].focusedWindowIndex;
+
+     if (*focusedWindowIndex <= 0) return;
+     (*focusedWindowIndex)--;
+     focusWindow(*focusedWindowIndex);
+
+     tile();
+}
+
+void actionNextWindow() {
+      int* focusedWindowIndex = &globals.workspaces[globals.currentWorkspace].focusedWindowIndex;
+     int numberOfWindows = globals.workspaces[globals.currentWorkspace].numberOfWindows;
+     
+     if (*focusedWindowIndex >= numberOfWindows) return;
+     (*focusedWindowIndex)++;
+     focusWindow(*focusedWindowIndex);
+
+     tile();
+}
+
+void actionSetWorkspace1() {
+     switchWorkspace(1);
+}
+
+void actionSetWorkspace2() {
+     switchWorkspace(2);
+}
+
+void actionSetWorkspace3() {
+     switchWorkspace(3);
+}
+
+void actionSetWorkspace4() {
+     switchWorkspace(4);
+}
+
+void actionSetWorkspace5() {
+     switchWorkspace(5);
+}
+
+void actionSetWorkspace6() {
+     switchWorkspace(6);
+}
+
+void actionSetWorkspace7() {
+     switchWorkspace(7);
+}
+
+void actionSetWorkspace8() {
+     switchWorkspace(8);
+}
+
+void actionSetWorkspace9() {
+     switchWorkspace(9);
+}
+
+void actionSetWorkspace0() {
+     switchWorkspace(0);
+}
+
+void actionSetMasterLayout() {
+     switchLayout(LAYOUT_MASTER);
+}
+
+void actionSetSuperiorMasterLayout() {
+     switchLayout(LAYOUT_SUPERIOR_MASTER);
+}
+
+void actionSetDwindleLayout() {
+     switchLayout(LAYOUT_DWINDLE);
+}
+
+void actionSetFibonacciLayout() {
+     switchLayout(LAYOUT_FIBONACCI);
+}
+
+void actionSetScrollLayout() {
+     switchLayout(LAYOUT_SCROLL);
+}
+
+void actionReloadConfiguration() {
+     readConfiguration();
+}
+
+void actionSpawnLauncher() {
+     spawnLauncher();
+}
+
+void actionExit() {
+     globals.running = false;
+}
+
+void actionToggleFullScreen() {
+     toggleFullscreen();
+}
+
+static Key keys[] = {
+     (Key) { //spawn terminal
+          .sym = XK_Return,
+          .mod = MOD_SUPER,
+          .action = actionSpawnTerminal
+     },
+
+     (Key) { //kill window
+          .sym = XK_q,
+          .mod = MOD_SUPER,
+          .action = actionKillWindow
+     },
+
+     (Key) { //previous window
+          .sym = XK_j,
+          .mod = MOD_SUPER,
+          .action = actionPreviousWindow
+     },
+
+     (Key) { //next window
+          .sym = XK_k,
+          .mod = MOD_SUPER,
+          .action = actionNextWindow
+     },
+
+     (Key) { //set workspace 1
+          .sym = XK_1,
+          .mod = MOD_SUPER,
+          .action = actionSetWorkspace1
+     },
+
+     (Key) { //set workspace 2
+          .sym = XK_2,
+          .mod = MOD_SUPER,
+          .action = actionSetWorkspace2
+     },
+
+     (Key) { //set workspace 3
+          .sym = XK_3,
+          .mod = MOD_SUPER,
+          .action = actionSetWorkspace3
+     },
+
+     (Key) { //set workspace 4
+          .sym = XK_4,
+          .mod = MOD_SUPER,
+          .action = actionSetWorkspace4
+     },
+
+     (Key) { //set workspace 5
+          .sym = XK_5,
+          .mod = MOD_SUPER,
+          .action = actionSetWorkspace5
+     },
+
+     (Key) { //set workspace 6
+          .sym = XK_6,
+          .mod = MOD_SUPER,
+          .action = actionSetWorkspace6
+     },
+
+     (Key) { //set workspace 7
+          .sym = XK_7,
+          .mod = MOD_SUPER,
+          .action = actionSetWorkspace7
+     },
+     
+     (Key) { //set workspace 8
+          .sym = XK_8,
+          .mod = MOD_SUPER,
+          .action = actionSetWorkspace8
+     },
+
+     (Key) { //set workspace 9
+          .sym = XK_9,
+          .mod = MOD_SUPER,
+          .action = actionSetWorkspace9
+     },
+
+     (Key) { //set workspace 0
+          .sym = XK_0,
+          .mod = MOD_SUPER,
+          .action = actionSetWorkspace0
+     },
+
+     (Key) { //set  master layout
+          .sym = XK_1,
+          .mod = MOD_ALT,
+          .action = actionSetMasterLayout
+     },
+
+     (Key) { //set superior master layout
+          .sym = XK_2,
+          .mod = MOD_ALT,
+          .action = actionSetSuperiorMasterLayout
+     },
+
+     (Key) { //set dwindle layout
+          .sym = XK_3,
+          .mod = MOD_ALT,
+          .action = actionSetDwindleLayout
+     },
+
+     (Key) { //set fibonacci layout
+          .sym = XK_4,
+          .mod = MOD_ALT,
+          .action = actionSetFibonacciLayout
+     },
+
+     (Key) { //set scroll layout
+          .sym = XK_5,
+          .mod = MOD_ALT,
+          .action = actionSetScrollLayout
+     },
+
+
+     (Key) { //reload configuration
+          .sym = XK_r,
+          .mod = MOD_SUPER,
+          .action = actionReloadConfiguration
+     },
+
+     (Key) { //spawn launcher
+          .sym = XK_space,
+          .mod = MOD_SUPER,
+          .action = actionSpawnLauncher
+     },
+
+     (Key) {
+          .sym = XK_e, //exit session
+          .mod = MOD_SUPER,
+          .action = actionExit
+     },
+
+     (Key) {
+          .sym = XK_F11, //toggle full screen
+          .mod = MOD_SUPER,
+          .action = actionToggleFullScreen
+     }
+};
+
+Key getKey() {
+     return (Key) {
+          .sym = XLookupKeysym(&globals.event.xkey, 0),
+          .mod = globals.event.xkey.state & (Mod4Mask | Mod1Mask | ShiftMask | ControlMask)
+     };
+}
+
+bool compareKeys(Key a, Key b) {
+     return (a.sym == b.sym && a.mod == b.mod);
+}
+
+void toggleFullscreen();
 
 void allocateColor(char* name, unsigned long* color, bool* failed, char errorBuffer[1024]) {
     XColor screenColor;
@@ -168,7 +475,6 @@ void setExtraConfiguration() {
     setWindowsBorderColor();
     setWindowsBorderSize();
     spawnWallpaper();
-    spawnStatusBar();
     spawnPicom();
 }
 
@@ -426,6 +732,30 @@ void fibonacciLayout() {
     XSync(globals.display, False);
 }
 
+void scrollLayout() {
+    Window* windows = globals.workspaces[globals.currentWorkspace].windows;
+    int numberOfWindows = globals.workspaces[globals.currentWorkspace].numberOfWindows;
+
+    if (numberOfWindows == 1) {
+         placeWindow(windows[0], 0, 0, globals.screenWidth, globals.screenHeight);
+         return;
+    }
+
+    int focusedWindowIndex = globals.workspaces[globals.currentWorkspace].focusedWindowIndex;
+    int halfHeight = globals.screenHeight / 2;
+     
+
+    if (focusedWindowIndex - 1 >= 0) placeWindow(windows[focusedWindowIndex - 1], 0, halfHeight, globals.screenWidth, halfHeight);
+    placeWindow(windows[focusedWindowIndex], 0, 0, globals.screenWidth, halfHeight);
+
+    for (int i = 0; i < numberOfWindows; i++) {
+          if (i == focusedWindowIndex || i == focusedWindowIndex - 1) continue;
+          XMoveResizeWindow(globals.display, windows[i], globals.screenWidth + 10, globals.screenHeight, 1, 1);
+     }
+         
+    XSync(globals.display, false);
+}
+
 void tile() {
     switch (globals.workspaces[globals.currentWorkspace].layout) {
     case LAYOUT_MASTER:
@@ -443,7 +773,9 @@ void tile() {
     case LAYOUT_FIBONACCI:
         fibonacciLayout();
         break;
-
+    case LAYOUT_SCROLL:
+        scrollLayout();
+     break;
     default:
         break;
     }
@@ -503,6 +835,41 @@ void destroy(Window deadWindow) {
     }
 
     tile();
+
+     if (globals.isFullscren) {
+          toggleFullscreen();
+          globals.workspaces[globals.currentWorkspace].focusedWindowIndex = 0;
+     }
+
+}
+
+void toggleFullscreen() {
+     Window window = globals.workspaces[globals.currentWorkspace].windows[globals.workspaces[globals.currentWorkspace].focusedWindowIndex];
+
+     if (!globals.isFullscren) {
+
+          for (int i = 0; i < maxWindows; i++) {
+               Window current = globals.workspaces[globals.currentWorkspace].windows[i];
+               XUnmapWindow(globals.display, current);
+          }
+          
+          XMoveResizeWindow(globals.display, window, 0, 0, globals.screenWidth, globals.screenHeight);
+          XMapWindow(globals.display, window);
+
+          globals.isFullscren = true;
+
+          return;
+     }
+     
+     XUnmapWindow(globals.display, window);
+     tile();
+
+     for (int i = 0; i < maxWindows; i++) {
+          Window current = globals.workspaces[globals.currentWorkspace].windows[i];
+          XMapWindow(globals.display, current);
+     }
+
+     globals.isFullscren = false;
 }
 
 void loadGlobals() {
@@ -525,38 +892,24 @@ void loadGlobals() {
 
     globals.currentWorkspace = 1;
     globals.running = true;
+
+    spawnStatusBar();
 }
 
 void loadKeys() {
     XSelectInput(globals.display, globals.root, SubstructureRedirectMask | SubstructureNotifyMask);
-
-    XGrabKey(globals.display, XKeysymToKeycode(globals.display, XK_Return), Mod4Mask, globals.root, True, GrabModeAsync, GrabModeAsync);
-    XGrabKey(globals.display, XKeysymToKeycode(globals.display, XK_q), Mod4Mask, globals.root, True, GrabModeAsync, GrabModeAsync);
-    XGrabKey(globals.display, XKeysymToKeycode(globals.display, XK_j), Mod4Mask, globals.root, True, GrabModeAsync, GrabModeAsync);
-    XGrabKey(globals.display, XKeysymToKeycode(globals.display, XK_k), Mod4Mask, globals.root, True, GrabModeAsync, GrabModeAsync);
-    XGrabKey(globals.display, XKeysymToKeycode(globals.display, XK_1), Mod4Mask, globals.root, True, GrabModeAsync, GrabModeAsync);
-    XGrabKey(globals.display, XKeysymToKeycode(globals.display, XK_2), Mod4Mask, globals.root, True, GrabModeAsync, GrabModeAsync);
-    XGrabKey(globals.display, XKeysymToKeycode(globals.display, XK_3), Mod4Mask, globals.root, True, GrabModeAsync, GrabModeAsync);
-    XGrabKey(globals.display, XKeysymToKeycode(globals.display, XK_4), Mod4Mask, globals.root, True, GrabModeAsync, GrabModeAsync);
-    XGrabKey(globals.display, XKeysymToKeycode(globals.display, XK_5), Mod4Mask, globals.root, True, GrabModeAsync, GrabModeAsync);
-    XGrabKey(globals.display, XKeysymToKeycode(globals.display, XK_6), Mod4Mask, globals.root, True, GrabModeAsync, GrabModeAsync);
-    XGrabKey(globals.display, XKeysymToKeycode(globals.display, XK_7), Mod4Mask, globals.root, True, GrabModeAsync, GrabModeAsync);
-    XGrabKey(globals.display, XKeysymToKeycode(globals.display, XK_8), Mod4Mask, globals.root, True, GrabModeAsync, GrabModeAsync);
-    XGrabKey(globals.display, XKeysymToKeycode(globals.display, XK_9), Mod4Mask, globals.root, True, GrabModeAsync, GrabModeAsync);
-    XGrabKey(globals.display, XKeysymToKeycode(globals.display, XK_0), Mod4Mask, globals.root, True, GrabModeAsync, GrabModeAsync);
-    XGrabKey(globals.display, XKeysymToKeycode(globals.display, XK_1), Mod1Mask, globals.root, True, GrabModeAsync, GrabModeAsync);
-    XGrabKey(globals.display, XKeysymToKeycode(globals.display, XK_2), Mod1Mask, globals.root, True, GrabModeAsync, GrabModeAsync);
-    XGrabKey(globals.display, XKeysymToKeycode(globals.display, XK_3), Mod1Mask, globals.root, True, GrabModeAsync, GrabModeAsync);
-    XGrabKey(globals.display, XKeysymToKeycode(globals.display, XK_4), Mod1Mask, globals.root, True, GrabModeAsync, GrabModeAsync);
-    XGrabKey(globals.display, XKeysymToKeycode(globals.display, XK_R), Mod4Mask, globals.root, True, GrabModeAsync, GrabModeAsync);
-    XGrabKey(globals.display, XKeysymToKeycode(globals.display, XK_space), Mod4Mask, globals.root, True, GrabModeAsync, GrabModeAsync);
-    XGrabKey(globals.display, XKeysymToKeycode(globals.display, XK_n), Mod1Mask, globals.root, True, GrabModeAsync, GrabModeAsync);
-    XGrabKey(globals.display, XKeysymToKeycode(globals.display, XK_e), Mod4Mask, globals.root, True, GrabModeAsync, GrabModeAsync);
+     
+    for (int i = 0; i < ACTION_KEY_SIZE; i++) {
+          XGrabKey(globals.display, XKeysymToKeycode(globals.display, keys[i].sym), (keys[i].mod == MOD_SUPER) ? Mod4Mask : Mod1Mask, globals.root, True, GrabModeAsync, GrabModeAsync);
+    }
+        
 
     XSync(globals.display, False);
 }
 
 void mapRequest() {
+    if (globals.isFullscren) toggleFullscreen();
+
     Window window = globals.event.xmaprequest.window;
 
     int numberOfClients = globals.workspaces[globals.currentWorkspace].numberOfWindows;
@@ -596,80 +949,22 @@ void configureRequest() {
     }
 }
 
-void handleKeys() {
+void keyboardInput() {
     int* index = &globals.workspaces[globals.currentWorkspace].focusedWindowIndex;
     int numberOfWindows = globals.workspaces[globals.currentWorkspace].numberOfWindows;
 
-    KeySym sym = XLookupKeysym(&globals.event.xkey, 0);
+    Key key = getKey();
+     
+    for (int i = 0; i < ACTION_KEY_SIZE; i++) {
+         if (compareKeys(key, keys[i])) {
+              keys[i].action();
+              break;
+         }
+    }
+}
 
-    uint32_t state = globals.event.xkey.state & (Mod4Mask | Mod1Mask | ShiftMask | ControlMask);
-
-    if (sym == XK_Return && state == Mod4Mask) {
-        spawnTerminal();
-    }
-    else if (sym == XK_q && state == Mod4Mask) {
-        killClient();
-    }
-    else if (sym == XK_j && state == Mod4Mask) {
-        if (*index >= numberOfWindows - 1) return;
-        focusWindow(++(*index));
-    }
-    else if (sym == XK_k && state == Mod4Mask) {
-        if (*index < 0) return;
-        focusWindow(--(*index));
-    }
-    else if (sym == XK_1 && state == Mod4Mask) {
-        switchWorkspace(1);
-    }
-    else if (sym == XK_2 && state == Mod4Mask) {
-        switchWorkspace(2);
-    }
-    else if (sym == XK_3 && state == Mod4Mask) {
-        switchWorkspace(3);
-    }
-    else if (sym == XK_4 && state == Mod4Mask) {
-        switchWorkspace(4);
-    }
-    else if (sym == XK_5 && state == Mod4Mask) {
-        switchWorkspace(5);
-    }
-    else if (sym == XK_6 && state == Mod4Mask) {
-        switchWorkspace(6);
-    }
-    else if (sym == XK_7 && state == Mod4Mask) {
-        switchWorkspace(7);
-    }
-    else if (sym == XK_8 && state == Mod4Mask) {
-        switchWorkspace(8);
-    }
-    else if (sym == XK_9 && state == Mod4Mask) {
-        switchWorkspace(9);
-    }
-    else if (sym == XK_0 && state == Mod4Mask) {
-        switchWorkspace(0);
-    }
-    else if (sym == XK_1 && state == Mod1Mask) {
-        switchLayout(LAYOUT_MASTER);
-    }
-    else if (sym == XK_2 && state == Mod1Mask) {
-        switchLayout(LAYOUT_SUPERIOR_MASTER);
-    }
-    else if (sym == XK_3 && state == Mod1Mask) {
-        switchLayout(LAYOUT_DWINDLE);
-    }
-    else if (sym == XK_4 && state == Mod1Mask) {
-        switchLayout(LAYOUT_FIBONACCI);
-    }
-    else if (sym == XK_r && state == Mod4Mask) {
-        readConfiguration();
-    }
-    else if (sym == XK_space && state == Mod4Mask) {
-        spawnLauncher();
-    }
-    else if (sym == XK_e && state == Mod4Mask) {
-         globals.running = false;
-    }
-
+void handleKeys() {
+    keyboardInput();
 }
 
 void mainLoop() {
@@ -703,6 +998,8 @@ int main() {
     loadGlobals();
     loadKeys();
     readConfiguration();
+
+    spawnStatusBar();
     mainLoop();
 
     freeStuff();
