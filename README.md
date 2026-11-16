@@ -12,7 +12,7 @@ Features:
 * Low resource usage
 * 10 workspaces
 
-[image]
+![](ultrawmImage.png)
 
 ## Installation
 ### Arch
