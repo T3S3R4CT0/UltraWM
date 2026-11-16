@@ -672,8 +672,6 @@ void createDefaultCnnfigurationFile() {
 }
 
 void readConfiguration() {
-    defaultConfiguration();
-     
     char* home = getpwuid(getuid())->pw_dir;
     char buffer[PATH_MAX];
     snprintf(buffer, PATH_MAX, "%s/.config/ultrawm/configuration.lua", home);

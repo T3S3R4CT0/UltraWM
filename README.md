@@ -22,7 +22,7 @@ Features:
 * coming soon
 
 ### Source
-1. git clone [repo]
+1. git clone https://github.com/T3S3R4CT0/UltraWM.git
 2. cd ultrawm
 3. ./build.sh
 
