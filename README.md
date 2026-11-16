@@ -5,26 +5,21 @@ UltraWM is a window manager for X11 written in C in just 1200 lines of code
 
 Features:
 
-*
-5 Different layouts (master, superior master, dwindle, fibonacci and scroll)
+* 5 Different layouts (master, superior master, dwindle, fibonacci and scroll)
 
-*
-Easy lua configuration file
+* Easy lua configuration file
  
-*
-Low resource usage
-*
-10 workspaces
+* Low resource usage
+* 10 workspaces
 
 [image]
 
 ## Installation
 ### Arch
-*
-coming soon
+* coming soon
 
 ### NixOS
-coming soon
+* coming soon
 
 ### Source
 1. git clone [repo]
