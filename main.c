@@ -11,6 +11,9 @@
 #include "lauxlib.h"
 #include "sys/wait.h"
 #include "pwd.h"
+#include "limits.h"
+#include "fcntl.h"
+#include "sys/stat.h"
 
 const int maxWindows = 12;
 const int maxWorkspaces = 10;
@@ -98,6 +101,14 @@ typedef struct {
 } Globals;
 
 static Globals globals;
+
+static inline Workspace getWorkspace() {
+     return globals.workspaces[globals.currentWorkspace];
+}
+
+static inline Workspace getSpecificWorkspace(int index) {
+     return globals.workspaces[index];
+}
 
 void spawnTerminal();
 void killClient();
@@ -374,6 +385,8 @@ void allocateColor(char* name, unsigned long* color, bool* failed, char errorBuf
 
     Colormap colormap = DefaultColormap(globals.display, globals.screen);
 
+    if (color != NULL && *color != 0) XFreeColors(globals.display, colormap, color, 1, 0);
+
     if (!XAllocNamedColor(globals.display, colormap, name, &screenColor, &exactColor)) {
         strncpy(errorBuffer, "Could not allocate color", 1024);
         *failed = true;
@@ -410,6 +423,8 @@ void setWindowsBorderSize() {
 }
 
 void spawn(char* args[]) {
+     signal(SIGCHLD, SIG_IGN);
+
     pid_t pid = fork();
 
     if (pid < 0) {
@@ -418,7 +433,6 @@ void spawn(char* args[]) {
 
     if (pid == 0) {
         execvp(args[0], args);
-        waitpid(pid, NULL, 0);
         _exit(1);
     }
 }
@@ -443,12 +457,30 @@ void spawnStatusBar() {
     spawn((char*[]){"sh", "-c", globals.configuration.statusBar, NULL});
 }
 
+void freeConfiguration() {
+    free(globals.configuration.focusedBorderColorName);
+    free(globals.configuration.unfocusedBorderColorName);
+    free(globals.configuration.terminalName);
+    free(globals.configuration.wallpaperPath);
+    free(globals.configuration.launcher);
+    free(globals.configuration.statusBar);
+    free(globals.configuration.picom);
+}
+
+
+
 void freeStuff() {
-    lua_close(globals.lua);
+    Colormap colormap = DefaultColormap(globals.display, globals.screen);    
+
+    XFreeColors(globals.display, colormap, &globals.focusedBorderColor, 1, 0);
+    XFreeColors(globals.display, colormap, &globals.unfocusedBorderColor, 1, 0);
+
+
+    freeConfiguration();
 }
 
 void setExtraConfiguration() {
-    bool failed;
+    bool failed = false;
     char errorBuffer[1024];
 
     allocateColor(globals.configuration.focusedBorderColorName, &globals.focusedBorderColor, &failed, errorBuffer);
@@ -467,24 +499,10 @@ void setExtraConfiguration() {
     setWindowsBorderSize();
 }
 
-void defaultConfiguration() {
-    globals.configuration.focusedBorderColorName = "#ffffff";
-    globals.configuration.unfocusedBorderColorName = "#444444";
-    globals.configuration.terminalName = "alacritty";
-    globals.configuration.wallpaperPath = "";
-    globals.configuration.launcher = NULL;
-    globals.configuration.borderSize = 1;
-    globals.configuration.statusBar = "";
-    globals.configuration.innerGaps = 0;
-    globals.configuration.outerGaps = 0;
-}
-
 bool loadLua(char* filePath) {
-    if (globals.lua) return true;
-
     globals.lua = luaL_newstate();
+
     if (globals.lua == NULL) {
-        fprintf(stderr, "Error: Could not open lua\n");
         return false;
     }
 
@@ -521,7 +539,7 @@ char* getLuaString(char* variable) {
     char* value = (char*)lua_tostring(globals.lua, -1);
     lua_pop(globals.lua, 1);
 
-    return value;
+    return strdup(value);
 }
 
 int getLuaInt(char* variable) {
@@ -550,6 +568,9 @@ bool getLuaSpawnTable() {
      char* terminalCommand = getLuaString("terminal");
      char* launcherCommand = getLuaString("launcher");
 
+     if (globals.configuration.terminalName != NULL) free(globals.configuration.terminalName);
+     if (globals.configuration.launcher != NULL) free(globals.configuration.launcher);
+
      globals.configuration.terminalName = terminalCommand;
      globals.configuration.launcher = launcherCommand;
 
@@ -561,13 +582,17 @@ bool getLuaAutostartTable() {
      if (!lua_istable(globals.lua, -1)) {
           fprintf(stderr, "Error: %s is not a table", "autostart");
           lua_pop(globals.lua, 1);
-          
           return true;
      }
 
      char* wallpaperPathCommand = getLuaString("wallpaperPath");
      char* statusBarCommand = getLuaString("statusBar");
      char* picomCommand = getLuaString("picom");
+
+
+     if (globals.configuration.wallpaperPath != NULL) free(globals.configuration.wallpaperPath);
+     if (globals.configuration.statusBar != NULL) free(globals.configuration.statusBar);
+     if (globals.configuration.picom != NULL) free(globals.configuration.picom);
 
      globals.configuration.wallpaperPath = wallpaperPathCommand;
      globals.configuration.statusBar = statusBarCommand;
@@ -591,6 +616,10 @@ bool getLuaWindowTable() {
      char* focusedBorderColorNameValue = getLuaString("focusedBorderColorName");
      char* unfocusedBorderColorNameValue = getLuaString("unfocusedBorderColorName");
 
+
+     if (globals.configuration.focusedBorderColorName != NULL) free(globals.configuration.focusedBorderColorName);
+     if (globals.configuration.unfocusedBorderColorName != NULL) free(globals.configuration.unfocusedBorderColorName);
+
      globals.configuration.borderSize = borderSizeValue;
      globals.configuration.innerGaps = innerGapsValue;
      globals.configuration.outerGaps = outerGapsValue;
@@ -600,19 +629,62 @@ bool getLuaWindowTable() {
      lua_pop(globals.lua, 1);
 }
 
+void createDefaultCnnfigurationFile() {
+    char* home = getpwuid(getuid())->pw_dir;
+    char buffer[PATH_MAX];
+    snprintf(buffer, PATH_MAX, "%s/.config/", home);
+
+    chdir(buffer);
+    mkdir("ultrawm", 0755);
+    chdir("ultrawm");
+
+    FILE* configuration = fopen("configuration.lua", "w");
+    if (!configuration) {
+         fprintf(stderr, "Error at opening configuration.lua\n");
+         exit(1);
+    }
+     
+     const char* defaultConfigurationString =
+        "configuration = {\n"
+        "    spawn = {\n"
+        "        terminal = \"alacritty\",\n"
+        "        launcher = \"rofi -show drun\",\n"
+        "    },\n"
+        "    autostart = {\n"
+        "        wallpaperPath = \"\",\n"
+        "        statusBar     = \"polybar\",\n"
+        "        picom         = \"picom -b\",\n"
+        "    },\n"
+        "    window = {\n"
+        "        focusedBorderColorName   = \"#ffffff\",\n"
+        "        unfocusedBorderColorName = \"#111111\",\n"
+        "        borderSize = 1,\n"
+        "        innerGaps  = 10,\n"
+        "        outerGaps  = 10,\n"
+        "    },\n"
+        "}\n";
+
+    
+    fprintf(configuration, "%s", defaultConfigurationString);
+
+    fclose(configuration);
+
+}
+
 void readConfiguration() {
     defaultConfiguration();
      
     char* home = getpwuid(getuid())->pw_dir;
-    char* configurationPath = "/.config/ultrawm/configuration.lua";
-    strcat(home, configurationPath);
+    char buffer[PATH_MAX];
+    snprintf(buffer, PATH_MAX, "%s/.config/ultrawm/configuration.lua", home);
      
-    if (!loadLua(home)) {
-        setExtraConfiguration();
-        return;
+    if (!loadLua(buffer)) {
+        createDefaultCnnfigurationFile();
+        loadLua(buffer);
     }
 
     if (!getLuaTable("configuration")) {
+
         setExtraConfiguration();
         return;
     }
@@ -624,6 +696,8 @@ void readConfiguration() {
     lua_pop(globals.lua, 1);
 
     setExtraConfiguration();
+
+    lua_close(globals.lua);
 }
 
 int xerror(Display* display, XErrorEvent* error) {
@@ -681,6 +755,7 @@ void removeWindow(Window window) {
             }
 
             globals.workspaces[workspace].numberOfWindows--;
+            globals.workspaces[workspace].focusedWindowIndex = globals.workspaces[workspace].numberOfWindows - 1;
             return;
         }
     }
@@ -1018,7 +1093,15 @@ void loadKeys() {
     XSelectInput(globals.display, globals.root, SubstructureRedirectMask | SubstructureNotifyMask);
      
     for (int i = 0; i < ACTION_KEY_SIZE; i++) {
-          XGrabKey(globals.display, XKeysymToKeycode(globals.display, keys[i].sym), (keys[i].mod == MOD_SUPER) ? Mod4Mask : Mod1Mask, globals.root, True, GrabModeAsync, GrabModeAsync);
+          XGrabKey(
+                    globals.display, 
+                    XKeysymToKeycode(globals.display, keys[i].sym), 
+                    (keys[i].mod == MOD_SUPER) ? Mod4Mask : Mod1Mask, 
+                    globals.root, 
+                    True, 
+                    GrabModeAsync, 
+                    GrabModeAsync
+          );
     }
         
 
@@ -1126,7 +1209,6 @@ int main() {
     autostart();
 
     mainLoop();
-
 
     freeStuff();
     return 0;
