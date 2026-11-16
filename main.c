@@ -9,14 +9,14 @@
 #include "lua.h"
 #include "lualib.h"
 #include "lauxlib.h"
+#include "sys/wait.h"
+#include "pwd.h"
 
 const int maxWindows = 12;
 const int maxWorkspaces = 10;
 
 typedef enum {
-    LAYOUT_MASTER,
-    LAYOUT_SUPERIOR_MASTER,
-    LAYOUT_DWINDLE,
+    LAYOUT_MASTER, LAYOUT_SUPERIOR_MASTER, LAYOUT_DWINDLE,
     LAYOUT_FIBONACCI,
     LAYOUT_SCROLL,
 } Layout;
@@ -60,7 +60,7 @@ typedef struct {
 } Key;
 
 typedef struct {
-    Window windows[36];
+    Window windows[12];
     size_t numberOfWindows;
     int focusedWindowIndex;
     Layout layout;
@@ -73,6 +73,7 @@ typedef struct {
     char* wallpaperPath;
     char* launcher;
     char* statusBar;
+    char* picom;
     int borderSize;
     int innerGaps;
     int outerGaps;
@@ -130,7 +131,7 @@ void actionNextWindow() {
       int* focusedWindowIndex = &globals.workspaces[globals.currentWorkspace].focusedWindowIndex;
      int numberOfWindows = globals.workspaces[globals.currentWorkspace].numberOfWindows;
      
-     if (*focusedWindowIndex >= numberOfWindows) return;
+     if (*focusedWindowIndex >= numberOfWindows - 1) return;
      (*focusedWindowIndex)++;
      focusWindow(*focusedWindowIndex);
 
@@ -416,18 +417,8 @@ void spawn(char* args[]) {
     }
 
     if (pid == 0) {
-        char* display = XDisplayString(globals.display);
-
-        if (display == NULL ||
-            setenv("DISPLAY", display, 1) == -1 ||
-            setenv("WAYLAND_DISPLAY", "", 1) == -1) {
-            perror("setenv");
-            _exit(127);
-        }
-
-        setenv("DISPLAY", display, 1);
-
         execvp(args[0], args);
+        waitpid(pid, NULL, 0);
         _exit(1);
     }
 }
@@ -474,8 +465,6 @@ void setExtraConfiguration() {
 
     setWindowsBorderColor();
     setWindowsBorderSize();
-    spawnWallpaper();
-    spawnPicom();
 }
 
 void defaultConfiguration() {
@@ -491,6 +480,8 @@ void defaultConfiguration() {
 }
 
 bool loadLua(char* filePath) {
+    if (globals.lua) return true;
+
     globals.lua = luaL_newstate();
     if (globals.lua == NULL) {
         fprintf(stderr, "Error: Could not open lua\n");
@@ -511,18 +502,20 @@ bool getLuaTable(char* table) {
     if (!lua_istable(globals.lua, -1)) {
         fprintf(stderr, "Error: %s is not a table\n", table);
         lua_pop(globals.lua, 1);
-        return false;
+
+        exit(1);
     }
 
     return true;
 }
 
-char* getLuaString(char* variable, char* fallback) {
+char* getLuaString(char* variable) {
     lua_getfield(globals.lua, -1, variable);
     if (lua_type(globals.lua, -1) != LUA_TSTRING) {
         fprintf(stderr, "Error: %s is not a string\n", variable);
         lua_pop(globals.lua, 1);
-        return fallback;
+          
+        exit(1);
     }
 
     char* value = (char*)lua_tostring(globals.lua, -1);
@@ -531,12 +524,11 @@ char* getLuaString(char* variable, char* fallback) {
     return value;
 }
 
-int getLuaInt(char* variable, int fallback) {
+int getLuaInt(char* variable) {
     lua_getfield(globals.lua, -1, variable);
     if (!lua_isinteger(globals.lua, -1)) {
         fprintf(stderr, "Error: %s is not a integer\n", variable);
         lua_pop(globals.lua, 1);
-        return fallback;
     }
 
     int value = lua_tointeger(globals.lua, -1);
@@ -545,10 +537,77 @@ int getLuaInt(char* variable, int fallback) {
     return value;
 }
 
+
+bool getLuaSpawnTable() {
+     lua_getfield(globals.lua, -1, "spawn");
+     if (!lua_istable(globals.lua, -1)) {
+          fprintf(stderr, "Error: %s is not a table", "spawn");
+          lua_pop(globals.lua, 1);
+          
+          return true;
+     }
+
+     char* terminalCommand = getLuaString("terminal");
+     char* launcherCommand = getLuaString("launcher");
+
+     globals.configuration.terminalName = terminalCommand;
+     globals.configuration.launcher = launcherCommand;
+
+     lua_pop(globals.lua, 1);
+}
+
+bool getLuaAutostartTable() {
+     lua_getfield(globals.lua, -1, "autostart");
+     if (!lua_istable(globals.lua, -1)) {
+          fprintf(stderr, "Error: %s is not a table", "autostart");
+          lua_pop(globals.lua, 1);
+          
+          return true;
+     }
+
+     char* wallpaperPathCommand = getLuaString("wallpaperPath");
+     char* statusBarCommand = getLuaString("statusBar");
+     char* picomCommand = getLuaString("picom");
+
+     globals.configuration.wallpaperPath = wallpaperPathCommand;
+     globals.configuration.statusBar = statusBarCommand;
+     globals.configuration.picom = picomCommand;
+
+     lua_pop(globals.lua, 1);
+}
+
+bool getLuaWindowTable() {
+     lua_getfield(globals.lua, -1, "window");
+     if (!lua_istable(globals.lua, -1)) {
+          fprintf(stderr, "Error: %s is not a table", "window");
+          lua_pop(globals.lua, 1);
+          
+          return true;
+     }
+     
+     int borderSizeValue = getLuaInt("borderSize");
+     int innerGapsValue = getLuaInt("innerGaps");
+     int outerGapsValue = getLuaInt("outerGaps");
+     char* focusedBorderColorNameValue = getLuaString("focusedBorderColorName");
+     char* unfocusedBorderColorNameValue = getLuaString("unfocusedBorderColorName");
+
+     globals.configuration.borderSize = borderSizeValue;
+     globals.configuration.innerGaps = innerGapsValue;
+     globals.configuration.outerGaps = outerGapsValue;
+     globals.configuration.focusedBorderColorName = focusedBorderColorNameValue;
+     globals.configuration.unfocusedBorderColorName = unfocusedBorderColorNameValue;
+
+     lua_pop(globals.lua, 1);
+}
+
 void readConfiguration() {
     defaultConfiguration();
-
-    if (!loadLua("/home/mateokb/.config/ultrawm/configuration.lua")) {
+     
+    char* home = getpwuid(getuid())->pw_dir;
+    char* configurationPath = "/.config/ultrawm/configuration.lua";
+    strcat(home, configurationPath);
+     
+    if (!loadLua(home)) {
         setExtraConfiguration();
         return;
     }
@@ -558,15 +617,9 @@ void readConfiguration() {
         return;
     }
 
-    globals.configuration.focusedBorderColorName = getLuaString("focusedBorderColorName", globals.configuration.focusedBorderColorName);
-    globals.configuration.unfocusedBorderColorName = getLuaString("unfocusedBorderColorName", globals.configuration.unfocusedBorderColorName);
-    globals.configuration.terminalName = getLuaString("terminalName", globals.configuration.terminalName);
-    globals.configuration.wallpaperPath = getLuaString("wallpaperPath", globals.configuration.wallpaperPath);
-    globals.configuration.launcher = getLuaString("launcher", globals.configuration.launcher);
-    globals.configuration.statusBar = getLuaString("statusBar", globals.configuration.statusBar);
-    globals.configuration.borderSize = getLuaInt("borderSize", globals.configuration.borderSize);
-    globals.configuration.innerGaps = getLuaInt("innerGaps", globals.configuration.innerGaps);
-    globals.configuration.outerGaps = getLuaInt("outerGaps", globals.configuration.outerGaps);
+    getLuaSpawnTable();
+    getLuaAutostartTable();
+    getLuaWindowTable();
 
     lua_pop(globals.lua, 1);
 
@@ -635,100 +688,152 @@ void removeWindow(Window window) {
     if (globals.workspaces[workspace].numberOfWindows > 0 && globals.workspaces[workspace].numberOfWindows < maxWindows) focusWindow(globals.workspaces[workspace].numberOfWindows - 1);
 }
 
-static void placeWindow(Window win, int x, int y, int w, int h) {
-    int o = globals.configuration.outerGaps;
-    int i = globals.configuration.innerGaps;
-    XMoveResizeWindow(globals.display, win, o + x + i/2, o + y + i/2, w - i, h - i);
+static void placeWindow(Window window, int x, int y, int width, int height) {
+    int outerGaps = globals.configuration.outerGaps;
+    int innerGaps = globals.configuration.innerGaps;
+
+    XMoveResizeWindow (
+              globals.display, 
+              window, 
+              outerGaps + x + innerGaps/2, 
+              outerGaps + y + innerGaps/2, 
+              width - innerGaps, 
+              height - innerGaps
+    );
 }
 
 void masterLayout() {
     Window* windows = globals.workspaces[globals.currentWorkspace].windows;
-    int n = globals.workspaces[globals.currentWorkspace].numberOfWindows;
-    if (n == 0) return;
+    int numberOfWindows = globals.workspaces[globals.currentWorkspace].numberOfWindows;
+    if (numberOfWindows == 0) return;
 
-    int o = globals.configuration.outerGaps;
-    int W = globals.screenWidth  - 2*o;
-    int H = globals.screenHeight - 2*o;
+    int outerGaps = globals.configuration.outerGaps;
+    int screenWidth = globals.screenWidth  - 2 * outerGaps;
+    int screenHeight = globals.screenHeight - 2 * outerGaps;
 
-    if (n == 1) { placeWindow(windows[0], 0, 0, W, H); return; }
+    if (numberOfWindows == 1) { placeWindow(windows[0], 0, 0, screenWidth, screenHeight); return; }
 
-    int midWidth = W / 2;
-    int each     = H / (n - 1);
-    placeWindow(windows[0], 0, 0, midWidth, H);
-    for (int i = 1; i < n; i++)
-        placeWindow(windows[i], midWidth, (i-1)*each, W - midWidth, each);
+    int midWidth = screenWidth / 2;
+    int each     = screenHeight / (numberOfWindows - 1);
+    placeWindow(windows[0], 0, 0, midWidth, screenHeight);
+
+    for (int i = 1; i < numberOfWindows; i++) {
+        placeWindow(windows[i], midWidth, (i - 1) * each, screenWidth - midWidth, each);
+    }
 
     XSync(globals.display, False);
 }
 
 void superiorMasterLayout() {
     Window* windows = globals.workspaces[globals.currentWorkspace].windows;
-    int n = globals.workspaces[globals.currentWorkspace].numberOfWindows;
-    if (n == 0) return;
+    int numberOfWindows = globals.workspaces[globals.currentWorkspace].numberOfWindows;
+    if (numberOfWindows == 0) return;
 
-    int o = globals.configuration.outerGaps;
-    int W = globals.screenWidth  - 2*o;
-    int H = globals.screenHeight - 2*o;
+    int outerGaps = globals.configuration.outerGaps;
+    int screenWidth = globals.screenWidth  - 2 * outerGaps;
+    int screenHeight = globals.screenHeight - 2 * outerGaps;
 
-    if (n == 1) { placeWindow(windows[0], 0, 0, W, H); return; }
+    if (numberOfWindows == 1) { placeWindow(windows[0], 0, 0, screenWidth, screenHeight); return; }
 
-    int midHeight = H / 2;
-    int each      = W / (n - 1);
-    placeWindow(windows[0], 0, 0, W, midHeight);
-    for (int i = 1; i < n; i++)
-        placeWindow(windows[i], (i-1)*each, midHeight, each, H - midHeight);
+    int midHeight = screenHeight / 2;
+    int each      = screenWidth / (numberOfWindows - 1);
+    placeWindow(windows[0], 0, 0, screenWidth, midHeight);
+
+    for (int i = 1; i < numberOfWindows; i++)
+        placeWindow(windows[i], (i - 1) * each, midHeight, each, screenHeight - midHeight);
 
     XSync(globals.display, False);
 }
 
 void dwindleLayout() {
     Window* windows = globals.workspaces[globals.currentWorkspace].windows;
-    int n = globals.workspaces[globals.currentWorkspace].numberOfWindows;
-    if (n == 0) return;
+    int numberOfWindows = globals.workspaces[globals.currentWorkspace].numberOfWindows;
+    if (numberOfWindows == 0) return;
 
-    int o = globals.configuration.outerGaps;
-    int W = globals.screenWidth  - 2*o;
-    int H = globals.screenHeight - 2*o;
+    int outerGaps = globals.configuration.outerGaps;
+    int screenWidth = globals.screenWidth  - 2 * outerGaps;
+    int screenHeight = globals.screenHeight - 2 * outerGaps;
 
-    if (n == 1) { placeWindow(windows[0], 0, 0, W, H); return; }
+    if (numberOfWindows == 1) { placeWindow(windows[0], 0, 0, screenWidth, screenHeight); return; }
 
-    int x = 0, y = 0, w = W, h = H;
-    for (int i = 0; i < n - 1; i++) {
+    int x = 0;
+    int y = 0;
+    int width = screenWidth;
+    int height = screenHeight;
+
+    for (int i = 0; i < numberOfWindows - 1; i++) {
         if (i % 2 == 0) {
-            int halfW = w / 2;
-            placeWindow(windows[i], x, y, halfW, h);
-            x += halfW; w -= halfW;
-        } else {
-            int halfH = h / 2;
-            placeWindow(windows[i], x, y, w, halfH);
-            y += halfH; h -= halfH;
+            int halfWidth = width / 2;
+            placeWindow(windows[i], x, y, halfWidth, height);
+
+            x += halfWidth; 
+            width -= halfWidth;
+        } 
+        else {
+            int halfHeight = height / 2;
+            placeWindow(windows[i], x, y, width, halfHeight);
+
+            y += halfHeight; 
+            height -= halfHeight;
         }
     }
-    placeWindow(windows[n-1], x, y, w, h);
+    placeWindow(windows[numberOfWindows-1], x, y, width, height);
     XSync(globals.display, False);
 }
 
 void fibonacciLayout() {
     Window* windows = globals.workspaces[globals.currentWorkspace].windows;
-    int n = globals.workspaces[globals.currentWorkspace].numberOfWindows;
-    if (n == 0) return;
+    int numberOfWindows = globals.workspaces[globals.currentWorkspace].numberOfWindows;
+    if (numberOfWindows == 0) return;
 
-    int o = globals.configuration.outerGaps;
-    int W = globals.screenWidth  - 2*o;
-    int H = globals.screenHeight - 2*o;
+    int outerGaps = globals.configuration.outerGaps;
+    int screenWidth = globals.screenWidth  - 2*outerGaps;
+    int screenHeight = globals.screenHeight - 2*outerGaps;
 
-    if (n == 1) { placeWindow(windows[0], 0, 0, W, H); return; }
+    if (numberOfWindows == 1) { 
+         placeWindow(windows[0], 0, 0, screenWidth, screenHeight); 
+         return; 
+    }
 
-    int x = 0, y = 0, w = W, h = H;
-    for (int i = 0; i < n - 1; i++) {
+    int x = 0;
+    int y = 0;
+    int width = screenWidth; 
+    int height = screenHeight;
+
+    for (int i = 0; i < numberOfWindows - 1; i++) {
         switch (i % 4) {
-        case 0: { int hw = w/2; placeWindow(windows[i], x, y, hw, h);        x += hw; w -= hw; break; }
-        case 1: { int hh = h/2; placeWindow(windows[i], x, y, w, hh);        y += hh; h -= hh; break; }
-        case 2: { int hw = w/2; placeWindow(windows[i], x+w-hw, y, hw, h);             w -= hw; break; }
-        case 3: { int hh = h/2; placeWindow(windows[i], x, y+h-hh, w, hh);             h -= hh; break; }
+        case 0: { 
+               int halfWidth = width / 2; 
+               placeWindow(windows[i], x, y, halfWidth, height);        
+               x += halfWidth; 
+               width -= halfWidth; 
+               
+               break; 
+        }
+        case 1: { 
+               int halfHeight = height / 2; 
+               placeWindow(windows[i], x, y, width, halfHeight);        
+               y += halfHeight; 
+               height -= halfHeight; 
+               
+               break; 
+        }
+        case 2: { 
+                int halfWidth = width / 2; 
+                placeWindow(windows[i], x + width - halfWidth, y, halfWidth, height);             
+                width -= halfWidth; 
+                break; 
+        }
+        case 3: { 
+               int halfHeight = height/2; 
+               placeWindow(windows[i], x, y + height - halfHeight, width, halfHeight);             
+               height -= halfHeight; 
+
+               break; 
+        }
         }
     }
-    placeWindow(windows[n-1], x, y, w, h);
+    placeWindow(windows[numberOfWindows - 1], x, y, width, height);
     XSync(globals.display, False);
 }
 
@@ -736,22 +841,39 @@ void scrollLayout() {
     Window* windows = globals.workspaces[globals.currentWorkspace].windows;
     int numberOfWindows = globals.workspaces[globals.currentWorkspace].numberOfWindows;
 
+    int outerGaps = globals.configuration.outerGaps;
+    int innerGaps = globals.configuration.innerGaps;
+
+    int screenWidth = globals.screenWidth  - 2*outerGaps;
+    int screenHeight = globals.screenHeight - 2*outerGaps;
+
+
     if (numberOfWindows == 1) {
-         placeWindow(windows[0], 0, 0, globals.screenWidth, globals.screenHeight);
+         placeWindow(windows[0], 0, 0, screenWidth, screenHeight);
          return;
     }
 
     int focusedWindowIndex = globals.workspaces[globals.currentWorkspace].focusedWindowIndex;
-    int halfHeight = globals.screenHeight / 2;
-     
+    int halfHeight = screenHeight / 2;
+    
+    if (focusedWindowIndex % 3 != 0) {
+          if (focusedWindowIndex - 1 >= 0) placeWindow(windows[focusedWindowIndex - 1], 0, halfHeight, globals.screenWidth, halfHeight);
+          placeWindow(windows[focusedWindowIndex], 0, 0, screenWidth, halfHeight);
+    }
+    else {
+          placeWindow(windows[focusedWindowIndex], 0, halfHeight, screenWidth, halfHeight);
+          if (focusedWindowIndex + 1 < numberOfWindows) placeWindow(windows[focusedWindowIndex + 1], 0, 0, globals.screenWidth, halfHeight);
 
-    if (focusedWindowIndex - 1 >= 0) placeWindow(windows[focusedWindowIndex - 1], 0, halfHeight, globals.screenWidth, halfHeight);
-    placeWindow(windows[focusedWindowIndex], 0, 0, globals.screenWidth, halfHeight);
+    }
+
+
 
     for (int i = 0; i < numberOfWindows; i++) {
-          if (i == focusedWindowIndex || i == focusedWindowIndex - 1) continue;
-          XMoveResizeWindow(globals.display, windows[i], globals.screenWidth + 10, globals.screenHeight, 1, 1);
-     }
+          if (i == focusedWindowIndex) continue;
+          if ((focusedWindowIndex % 3 != 0) && i == focusedWindowIndex - 1) continue;
+          if ((focusedWindowIndex % 3 == 0) && i == focusedWindowIndex + 1) continue;
+          XMoveResizeWindow(globals.display, windows[i], screenWidth + 10, screenHeight, 1, 1);
+    }
          
     XSync(globals.display, false);
 }
@@ -793,8 +915,6 @@ void switchWorkspace(int workspace) {
         int window = globals.workspaces[globals.currentWorkspace].windows[i];
         XMapWindow(globals.display, window);
     }
-
-    globals.workspaces[globals.currentWorkspace].focusedWindowIndex = 0;
 
     tile();
 }
@@ -892,8 +1012,6 @@ void loadGlobals() {
 
     globals.currentWorkspace = 1;
     globals.running = true;
-
-    spawnStatusBar();
 }
 
 void loadKeys() {
@@ -967,6 +1085,12 @@ void handleKeys() {
     keyboardInput();
 }
 
+void autostart() {
+    spawnStatusBar();
+    spawnPicom();
+    spawnWallpaper();
+}
+
 void mainLoop() {
     while (globals.running) {
         XNextEvent(globals.display, &globals.event);
@@ -997,10 +1121,12 @@ void mainLoop() {
 int main() {
     loadGlobals();
     loadKeys();
+    
     readConfiguration();
+    autostart();
 
-    spawnStatusBar();
     mainLoop();
+
 
     freeStuff();
     return 0;
