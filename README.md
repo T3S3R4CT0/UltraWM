@@ -27,11 +27,11 @@ coming soon
 coming soon
 
 ### Source
-1. git clone:[repo]
+1. git clone [repo]
 2. cd ultrawm
 3. ./build.sh
 
 # NOTE:
-## UltraWM is in an early development stage, it may lack some features and have some bugs. If you find a bug, have a issue or a useful feature in mind, please make a pull request 
+## UltraWM is in an early development stage, it may lack some features and have some bugs. If you find a bug, have a issue or a useful feature in mind, please tell me
 
  
