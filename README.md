@@ -26,7 +26,7 @@ Features:
 2. cd ultrawm
 3. ./build.sh
 
-#Keybinds
+# Keybinds
 * Super + enter = spawn terminal
 * Super + q = kill window
 * Super + j = previous window
